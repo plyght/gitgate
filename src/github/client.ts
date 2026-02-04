@@ -5,7 +5,7 @@ export class GitHubClient {
   private octokit: Octokit;
 
   constructor(token: string) {
-    this.octokit = new Octokit({ auth: token });
+    this.octokit = new Octokit({ auth: token, request: { timeout: 30000 } });
   }
 
   async getRelease(
@@ -22,6 +22,7 @@ export class GitHubClient {
 
       return this.mapRelease(response.data);
     } catch {
+      console.warn("GitHub release fetch failed");
       return null;
     }
   }
@@ -40,6 +41,7 @@ export class GitHubClient {
 
       return response.data.map((r) => this.mapRelease(r));
     } catch {
+      console.warn("GitHub releases list failed");
       return [];
     }
   }
@@ -69,6 +71,7 @@ export class GitHubClient {
 
       return null;
     } catch {
+      console.warn("GitHub asset download failed");
       return null;
     }
   }

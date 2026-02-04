@@ -27,6 +27,7 @@ export class AuditLogger {
       const line = JSON.stringify(entry) + "\n";
       appendFileSync(this.logFile, line, "utf-8");
     } catch {
+      console.warn("Audit log write failed");
       // Silently fail on log write errors
     }
   }

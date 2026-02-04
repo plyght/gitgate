@@ -20,6 +20,7 @@ export class AssetSigner {
       verify.update(data);
       return verify.verify(publicKey, signature, "base64");
     } catch {
+      console.warn("Signature verification failed");
       return false;
     }
   }

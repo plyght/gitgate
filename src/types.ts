@@ -29,6 +29,12 @@ export interface Config {
     enabled: boolean;
     log_file?: string;
   };
+  security?: {
+    cors?: {
+      allowed_origins?: string[];
+      allow_credentials?: boolean;
+    };
+  };
 }
 
 export interface DeviceContext {
@@ -81,4 +87,6 @@ export interface AuditLog {
 export interface RateLimitState {
   requests: number;
   reset_at: number;
+  blocked_until?: number;
+  violations?: number;
 }

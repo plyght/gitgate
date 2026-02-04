@@ -38,6 +38,7 @@ export class CacheManager {
 
       return Buffer.from(entry.data, "base64");
     } catch {
+      console.warn("Cache read failed");
       return null;
     }
   }
@@ -56,6 +57,7 @@ export class CacheManager {
     try {
       writeFileSync(path, JSON.stringify(entry), "utf-8");
     } catch {
+      console.warn("Cache write failed");
       // Silently fail on cache write errors
     }
   }
@@ -77,6 +79,7 @@ export class CacheManager {
 
       return entry.checksum;
     } catch {
+      console.warn("Cache checksum read failed");
       return null;
     }
   }
@@ -88,6 +91,7 @@ export class CacheManager {
         // Use a simple approach to delete
         writeFileSync(path, "");
       } catch {
+        console.warn("Cache clear failed");
         // Silently fail
       }
     }

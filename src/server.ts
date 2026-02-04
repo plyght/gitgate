@@ -7,6 +7,20 @@ import { CacheManager } from "./github/cache";
 import { AssetSigner } from "./github/signing";
 import { AuditLogger } from "./audit/logger";
 import { RateLimiter } from "./middleware/ratelimit";
+import {
+  collectValidatedHeaders,
+  validateAssetName,
+  validateOrigin,
+  validateOwnerRepo,
+  parseForwardedFor,
+  validateVersion,
+} from "./utils/validation";
+import {
+  AppError,
+  ExternalServiceError,
+  RateLimitError,
+  ValidationError,
+} from "./utils/errors";
 
 export function createServer(config: Config): Hono {
   const app = new Hono();
@@ -17,7 +31,10 @@ export function createServer(config: Config): Hono {
     config.github.cache_ttl_seconds,
   );
   const auditLogger = new AuditLogger(config.audit?.log_file);
-  const rateLimiter = new RateLimiter(60);
+  const rateLimitLimit = 60;
+  const rateLimiter = new RateLimiter(rateLimitLimit);
+  const corsAllowedOrigins = config.security?.cors?.allowed_origins || [];
+  const corsAllowCredentials = config.security?.cors?.allow_credentials || false;
 
   let assetSigner: AssetSigner | null = null;
   if (config.signing?.enabled && config.signing?.private_key_path) {
@@ -41,14 +58,60 @@ export function createServer(config: Config): Hono {
     return undefined;
   }
 
+  app.onError((err, c) => {
+    console.error("Request failed");
+    if (err instanceof AppError) {
+      return c.json({ error: err.message }, err.status);
+    }
+    return c.json({ error: "Internal server error" }, 500);
+  });
+
+  app.use("*", async (c, next) => {
+    const origin = validateOrigin(c.req.header("origin"));
+    if (origin && corsAllowedOrigins.includes(origin)) {
+      c.header("Access-Control-Allow-Origin", origin);
+      c.header("Vary", "Origin");
+      if (corsAllowCredentials) {
+        c.header("Access-Control-Allow-Credentials", "true");
+      }
+    }
+    c.header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    c.header("X-Frame-Options", "DENY");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+    if (c.req.method === "OPTIONS") {
+      c.header("Access-Control-Allow-Methods", "GET,OPTIONS");
+      c.header(
+        "Access-Control-Allow-Headers",
+        "authorization,content-type,x-jamf-token,x-tailscale-user,x-tailscale-device,x-tailscale-ip,x-device-id",
+      );
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
   app.get("/health", (c) => {
     return c.json({ status: "ok", timestamp: Date.now() });
   });
 
+  function applyRateLimitHeaders(
+    c: { header: (name: string, value: string) => void },
+    limit: number,
+    remaining: number,
+    resetAt: number,
+  ): void {
+    c.header("X-RateLimit-Limit", limit.toString());
+    c.header("X-RateLimit-Remaining", remaining.toString());
+    c.header("X-RateLimit-Reset", Math.floor(resetAt / 1000).toString());
+  }
+
   app.get("/releases/:owner/:repo", async (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const headers = Object.fromEntries(c.req.raw.headers);
+    const owner = validateOwnerRepo(c.req.param("owner"));
+    const repo = validateOwnerRepo(c.req.param("repo"));
+    if (!owner || !repo) {
+      throw new ValidationError("Invalid request");
+    }
+    const headers = collectValidatedHeaders(c.req.raw.headers);
 
     const device = await authenticateDevice(
       config.auth.method,
@@ -58,6 +121,15 @@ export function createServer(config: Config): Hono {
     );
 
     if (!device) {
+      const anonKey = parseForwardedFor(headers["x-forwarded-for"]);
+      const anonId = `anon:${anonKey}`;
+      const anonAllowed = rateLimiter.isAllowed(anonId);
+      const anonRemaining = rateLimiter.getRemainingRequests(anonId);
+      const anonReset = rateLimiter.getResetTime(anonId);
+      applyRateLimitHeaders(c, rateLimitLimit, anonRemaining, anonReset);
+      if (!anonAllowed) {
+        return c.json({ error: "Rate limited" }, 429);
+      }
       auditLogger.logAction(
         "unknown",
         "list_releases",
@@ -66,8 +138,11 @@ export function createServer(config: Config): Hono {
       );
       return c.json({ error: "Unauthorized" }, 401);
     }
-
-    if (!rateLimiter.isAllowed(device.device_id)) {
+    const allowed = rateLimiter.isAllowed(device.device_id);
+    const remaining = rateLimiter.getRemainingRequests(device.device_id);
+    const resetAt = rateLimiter.getResetTime(device.device_id);
+    applyRateLimitHeaders(c, rateLimitLimit, remaining, resetAt);
+    if (!allowed) {
       auditLogger.logAction(
         device.device_id,
         "list_releases",
@@ -75,7 +150,7 @@ export function createServer(config: Config): Hono {
         "failure",
         { reason: "rate_limited" },
       );
-      return c.json({ error: "Rate limited" }, 429);
+      throw new RateLimitError("Rate limited");
     }
 
     const cacheKey = `releases:${owner}:${repo}`;
@@ -118,11 +193,14 @@ export function createServer(config: Config): Hono {
   });
 
   app.get("/release/:owner/:repo/:version/:asset", async (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const version = c.req.param("version");
-    const assetName = c.req.param("asset");
-    const headers = Object.fromEntries(c.req.raw.headers);
+    const owner = validateOwnerRepo(c.req.param("owner"));
+    const repo = validateOwnerRepo(c.req.param("repo"));
+    const version = validateVersion(c.req.param("version"));
+    const assetName = validateAssetName(c.req.param("asset"));
+    if (!owner || !repo || !version || !assetName) {
+      throw new ValidationError("Invalid request");
+    }
+    const headers = collectValidatedHeaders(c.req.raw.headers);
 
     const device = await authenticateDevice(
       config.auth.method,
@@ -132,6 +210,15 @@ export function createServer(config: Config): Hono {
     );
 
     if (!device) {
+      const anonKey = parseForwardedFor(headers["x-forwarded-for"]);
+      const anonId = `anon:${anonKey}`;
+      const anonAllowed = rateLimiter.isAllowed(anonId);
+      const anonRemaining = rateLimiter.getRemainingRequests(anonId);
+      const anonReset = rateLimiter.getResetTime(anonId);
+      applyRateLimitHeaders(c, rateLimitLimit, anonRemaining, anonReset);
+      if (!anonAllowed) {
+        return c.json({ error: "Rate limited" }, 429);
+      }
       auditLogger.logAction(
         "unknown",
         "download_asset",
@@ -140,8 +227,11 @@ export function createServer(config: Config): Hono {
       );
       return c.json({ error: "Unauthorized" }, 401);
     }
-
-    if (!rateLimiter.isAllowed(device.device_id)) {
+    const allowed = rateLimiter.isAllowed(device.device_id);
+    const remaining = rateLimiter.getRemainingRequests(device.device_id);
+    const resetAt = rateLimiter.getResetTime(device.device_id);
+    applyRateLimitHeaders(c, rateLimitLimit, remaining, resetAt);
+    if (!allowed) {
       auditLogger.logAction(
         device.device_id,
         "download_asset",
@@ -149,7 +239,7 @@ export function createServer(config: Config): Hono {
         "failure",
         { reason: "rate_limited" },
       );
-      return c.json({ error: "Rate limited" }, 429);
+      throw new RateLimitError("Rate limited");
     }
 
     const cacheKey = `asset:${owner}:${repo}:${version}:${assetName}`;
@@ -160,8 +250,7 @@ export function createServer(config: Config): Hono {
       c.header("X-Checksum-SHA256", checksum || "");
 
       if (assetSigner) {
-        // @ts-ignore - Bun Buffer compatibility
-        const cachedBuffer = Buffer.from(cached, "base64");
+        const cachedBuffer = cached instanceof Buffer ? cached : Buffer.from(cached);
         const signature = assetSigner.sign(cachedBuffer);
         c.header("X-Signature-RSA-SHA256", signature);
       }
@@ -174,8 +263,7 @@ export function createServer(config: Config): Hono {
         { cached: true },
       );
       c.header("Content-Type", "application/octet-stream");
-      // @ts-ignore - Bun Buffer compatibility
-      const buf = Buffer.from(cached, "base64");
+      const buf = cached instanceof Buffer ? cached : Buffer.from(cached);
       return new Response(buf);
     }
 
@@ -215,7 +303,7 @@ export function createServer(config: Config): Hono {
         "failure",
         { reason: "download_failed" },
       );
-      return c.json({ error: "Failed to download asset" }, 500);
+      throw new ExternalServiceError("Request failed");
     }
 
     cacheManager.set(cacheKey, data);
