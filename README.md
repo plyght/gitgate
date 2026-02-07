@@ -53,7 +53,54 @@ Assets include SHA256 checksums in `X-Checksum-SHA256` headers. When signing is 
 
 ## Configuration
 
-Create `config.json` based on `config.example.json`:
+GitGate supports two configuration methods:
+1. **Environment variables** (recommended for containerized deployments like Dokploy)
+2. **JSON configuration file** (`config.json`)
+
+Environment variables take precedence over the config file.
+
+### Environment Variables
+
+Set these environment variables for configuration:
+
+```bash
+GITHUB_TOKEN=ghp_your_fine_grained_pat_here
+AUTH_METHOD=tailscale
+
+GITGATE_PORT=3000
+GITGATE_HOST=0.0.0.0
+
+GITHUB_CACHE_DIR=./cache
+GITHUB_CACHE_TTL_SECONDS=3600
+
+TAILSCALE_API_KEY=tskey_your_tailscale_api_key
+
+JAMF_API_URL=https://your-instance.jamfcloud.com
+JAMF_API_KEY=your_api_key
+JAMF_API_SECRET=your_api_secret
+
+MTLS_CA_CERT_PATH=/path/to/ca.crt
+MTLS_REQUIRE_CLIENT_CERT=true
+
+SIGNING_ENABLED=false
+SIGNING_PRIVATE_KEY_PATH=/path/to/private.key
+
+AUDIT_ENABLED=true
+AUDIT_LOG_FILE=./logs/audit.log
+```
+
+**Required variables:**
+- `GITHUB_TOKEN`: GitHub personal access token
+- `AUTH_METHOD`: One of `jamf`, `tailscale`, `mtls`, or `none`
+
+**Auth-method-specific variables:**
+- For `jamf`: `JAMF_API_URL`, `JAMF_API_KEY`, `JAMF_API_SECRET`
+- For `tailscale`: `TAILSCALE_API_KEY`
+- For `mtls`: `MTLS_CA_CERT_PATH`, `MTLS_REQUIRE_CLIENT_CERT`
+
+### JSON Configuration File
+
+Alternatively, create `config.json` based on `config.example.json`:
 
 ```json
 {

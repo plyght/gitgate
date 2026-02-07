@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Config } from "./types";
 import { ConfigError } from "./utils/errors";
@@ -6,8 +6,88 @@ import { resolveSafePath, validateHttpsUrl } from "./utils/validation";
 
 let cachedConfig: Config | null = null;
 
+function parseBoolean(value: string | undefined): boolean {
+  if (!value) return false;
+  return value.toLowerCase() === "true" || value === "1";
+}
+
+function loadFromEnv(): Config | null {
+  const requiredEnvVars = ["GITHUB_TOKEN", "AUTH_METHOD"];
+  const hasRequiredVars = requiredEnvVars.every((key) => process.env[key]);
+
+  if (!hasRequiredVars) {
+    return null;
+  }
+
+  const config: Config = {
+    port: parseInt(process.env.GITGATE_PORT || "3000", 10),
+    host: process.env.GITGATE_HOST || "0.0.0.0",
+    github: {
+      token: process.env.GITHUB_TOKEN!,
+      cache_dir: process.env.GITHUB_CACHE_DIR || "./cache",
+      cache_ttl_seconds: parseInt(
+        process.env.GITHUB_CACHE_TTL_SECONDS || "3600",
+        10,
+      ),
+    },
+    auth: {
+      method: process.env.AUTH_METHOD as
+        | "jamf"
+        | "tailscale"
+        | "mtls"
+        | "none",
+    },
+  };
+
+  if (config.auth.method === "jamf") {
+    config.auth.jamf = {
+      api_url: process.env.JAMF_API_URL || "",
+      api_key: process.env.JAMF_API_KEY || "",
+      api_secret: process.env.JAMF_API_SECRET || "",
+    };
+  }
+
+  if (config.auth.method === "tailscale") {
+    config.auth.tailscale = {
+      api_key: process.env.TAILSCALE_API_KEY || "",
+    };
+  }
+
+  if (config.auth.method === "mtls") {
+    config.auth.mtls = {
+      ca_cert_path: process.env.MTLS_CA_CERT_PATH || "",
+      require_client_cert: parseBoolean(
+        process.env.MTLS_REQUIRE_CLIENT_CERT || "true",
+      ),
+    };
+  }
+
+  if (process.env.SIGNING_ENABLED) {
+    config.signing = {
+      enabled: parseBoolean(process.env.SIGNING_ENABLED),
+      private_key_path: process.env.SIGNING_PRIVATE_KEY_PATH,
+    };
+  }
+
+  if (process.env.AUDIT_ENABLED) {
+    config.audit = {
+      enabled: parseBoolean(process.env.AUDIT_ENABLED),
+      log_file: process.env.AUDIT_LOG_FILE,
+    };
+  }
+
+  return config;
+}
+
 export function loadConfig(configPath?: string): Config {
   if (cachedConfig) {
+    return cachedConfig;
+  }
+
+  const envConfig = loadFromEnv();
+  if (envConfig) {
+    console.log("Configuration loaded from environment variables");
+    cachedConfig = envConfig;
     return cachedConfig;
   }
 
@@ -16,12 +96,15 @@ export function loadConfig(configPath?: string): Config {
     configPath || process.env.GITGATE_CONFIG || resolve(baseDir, "config.json");
   const path = resolveSafePath(baseDir, inputPath);
 
-  if (!path) {
-    throw new ConfigError("Invalid configuration path");
+  if (!path || !existsSync(path)) {
+    throw new ConfigError(
+      "Configuration not found. Provide GITHUB_TOKEN and AUTH_METHOD environment variables or a config.json file",
+    );
   }
 
   try {
     const content = readFileSync(path, "utf-8");
+    console.log(`Configuration loaded from ${path}`);
     cachedConfig = JSON.parse(content) as Config;
     return cachedConfig;
   } catch (error) {
