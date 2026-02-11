@@ -61,12 +61,18 @@ export class GitHubClient {
         },
       });
 
-      if (response.data instanceof Buffer) {
-        return response.data;
+      const data = response.data;
+
+      if (data instanceof Buffer) {
+        return data;
       }
 
-      if (typeof response.data === "string") {
-        return Buffer.from(response.data);
+      if (data instanceof ArrayBuffer) {
+        return Buffer.from(data);
+      }
+
+      if (typeof data === "string") {
+        return Buffer.from(data);
       }
 
       return null;
