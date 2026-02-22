@@ -90,6 +90,10 @@ export function createServer(config: Config): Hono {
     await next();
   });
 
+  app.get("/", (c) => {
+    return c.json({ status: "ok" });
+  });
+
   app.get("/health", (c) => {
     return c.json({ status: "ok", timestamp: Date.now() });
   });
