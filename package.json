@@ -12,8 +12,9 @@
     "type-check": "bunx tsc --noEmit"
   },
   "dependencies": {
+    "@octokit/rest": "^20.0.0",
     "hono": "^4.0.0",
-    "@octokit/rest": "^20.0.0"
+    "lru-cache": "^11.3.5"
   },
   "devDependencies": {
     "typescript": "^5.3.0",

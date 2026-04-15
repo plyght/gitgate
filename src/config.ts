@@ -29,6 +29,15 @@ function loadFromEnv(): Config | null {
         process.env.GITHUB_CACHE_TTL_SECONDS || "3600",
         10,
       ),
+      cache: {
+        metadata_ttl_seconds: parseInt(process.env.CACHE_METADATA_TTL_SECONDS || "300", 10),
+        asset_ttl_seconds: parseInt(process.env.CACHE_ASSET_TTL_SECONDS || "86400", 10),
+        max_items: parseInt(process.env.CACHE_MAX_ITEMS || "500", 10),
+        max_mb: parseInt(process.env.CACHE_MAX_MB || "256", 10),
+        stale_while_revalidate_seconds: parseInt(process.env.CACHE_STALE_WHILE_REVALIDATE_SECONDS || "60", 10),
+        stale_if_error_seconds: parseInt(process.env.CACHE_STALE_IF_ERROR_SECONDS || "3600", 10),
+        enable_etags: parseBoolean(process.env.CACHE_ENABLE_ETAGS || "true"),
+      },
     },
     auth: {
       method: process.env.AUTH_METHOD as

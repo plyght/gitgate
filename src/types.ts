@@ -1,3 +1,13 @@
+export interface CacheConfig {
+  metadata_ttl_seconds: number;
+  asset_ttl_seconds: number;
+  max_items: number;
+  max_mb: number;
+  stale_while_revalidate_seconds: number;
+  stale_if_error_seconds: number;
+  enable_etags: boolean;
+}
+
 export interface Config {
   port: number;
   host: string;
@@ -5,6 +15,7 @@ export interface Config {
     token: string;
     cache_dir: string;
     cache_ttl_seconds: number;
+    cache?: Partial<CacheConfig>;
   };
   auth: {
     method: "jamf" | "tailscale" | "mtls" | "none";
@@ -51,6 +62,49 @@ export interface CacheEntry {
   checksum: string;
   timestamp: number;
   ttl: number;
+}
+
+export interface CacheMeta {
+  key: string;
+  checksum: string;
+  etag?: string;
+  last_modified?: string;
+  timestamp: number;
+  ttl: number;
+  size: number;
+  content_type: string;
+  stale_while_revalidate: number;
+  stale_if_error: number;
+}
+
+export interface CacheStats {
+  memory: {
+    items: number;
+    max_items: number;
+    size_bytes: number;
+    max_bytes: number;
+    hits: number;
+    misses: number;
+    hit_rate: string;
+  };
+  etag: {
+    conditional_requests: number;
+    not_modified: number;
+    savings_rate: string;
+  };
+  github: {
+    requests_remaining: number | null;
+    requests_limit: number | null;
+    reset_at: string | null;
+  };
+  uptime_seconds: number;
+}
+
+export interface GitHubRateLimitInfo {
+  remaining: number;
+  limit: number;
+  reset: number;
+  used: number;
 }
 
 export interface ReleaseAsset {
