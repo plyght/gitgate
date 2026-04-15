@@ -170,6 +170,13 @@ export function createServer(config: Config): Hono {
     return result.allowed;
   }
 
+  function toArrayBuffer(buf: Buffer): ArrayBuffer {
+    const ab = new ArrayBuffer(buf.byteLength);
+    const view = new Uint8Array(ab);
+    view.set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+    return ab;
+  }
+
   function showRateLimitHeaders(
     c: { header: (name: string, value: string) => void },
     deviceKey: string,
@@ -373,7 +380,7 @@ export function createServer(config: Config): Hono {
         { cached: true },
       );
       c.header("Content-Type", "application/octet-stream");
-      return new Response(cached.data);
+      return c.body(toArrayBuffer(cached.data));
     }
 
     if (!enforceRateLimit(c, deviceKey)) {
@@ -389,7 +396,7 @@ export function createServer(config: Config): Hono {
           { cached: true, stale: true, rate_limited: true },
         );
         c.header("Content-Type", "application/octet-stream");
-        return new Response(cached.data);
+        return c.body(toArrayBuffer(cached.data));
       }
       auditLogger.logAction(
         deviceKey,
@@ -421,7 +428,7 @@ export function createServer(config: Config): Hono {
           { cached: true, revalidated: true },
         );
         c.header("Content-Type", "application/octet-stream");
-        return new Response(cached.data);
+        return c.body(toArrayBuffer(cached.data));
       }
 
       if (!releaseResult.release) {
@@ -430,7 +437,7 @@ export function createServer(config: Config): Hono {
           c.header("X-Checksum-SHA256", cached.meta.checksum);
           if (assetSigner) c.header("X-Signature-RSA-SHA256", assetSigner.sign(cached.data));
           c.header("Content-Type", "application/octet-stream");
-          return new Response(cached.data);
+          return c.body(toArrayBuffer(cached.data));
         }
 
         auditLogger.logAction(
@@ -465,7 +472,7 @@ export function createServer(config: Config): Hono {
           c.header("X-Checksum-SHA256", staleEntry.meta.checksum);
           if (assetSigner) c.header("X-Signature-RSA-SHA256", assetSigner.sign(staleEntry.data));
           c.header("Content-Type", "application/octet-stream");
-          return new Response(staleEntry.data);
+          return c.body(toArrayBuffer(staleEntry.data));
         }
 
         auditLogger.logAction(
@@ -495,7 +502,7 @@ export function createServer(config: Config): Hono {
         "success",
       );
       c.header("Content-Type", "application/octet-stream");
-      return new Response(data);
+      return c.body(toArrayBuffer(data));
     } catch (err) {
       const staleEntry = cached ?? cache.getStale(cacheKey);
       if (staleEntry) {
@@ -510,7 +517,7 @@ export function createServer(config: Config): Hono {
           "success",
           { cached: true, stale_if_error: true },
         );
-        return new Response(staleEntry.data);
+        return c.body(toArrayBuffer(staleEntry.data));
       }
       throw err;
     }
