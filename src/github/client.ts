@@ -31,6 +31,7 @@ export class GitHubClient {
   ): Promise<{ release: Release | null; etag?: string; lastModified?: string; notModified: boolean }> {
     const cacheKey = `release:${owner}:${repo}:${tag}`;
     const conditionalHeaders = this.buildConditionalHeaders(cacheKey);
+    const isConditional = Object.keys(conditionalHeaders).length > 0;
 
     return this.withRetry(async () => {
       try {
@@ -45,6 +46,8 @@ export class GitHubClient {
         this.extractRateLimitInfo(h);
         this.storeETag(cacheKey, h);
 
+        if (isConditional) this.etagStore?.recordConditionalRequest();
+
         return {
           release: this.mapRelease(response.data),
           etag: h.etag,
@@ -53,16 +56,17 @@ export class GitHubClient {
         };
       } catch (err: unknown) {
         if (this.isNotModified(err)) {
-          this.etagStore?.recordConditionalRequest(true);
+          this.etagStore?.recordConditionalRequest();
+          this.etagStore?.recordNotModified();
           return { release: null, notModified: true };
         }
         if (this.isRateLimited(err)) {
-          const retryAfter = this.getRetryAfter(err);
-          if (retryAfter) await this.sleep(retryAfter * 1000);
           throw err;
         }
-        console.warn("[github] release fetch failed for", `${owner}/${repo}@${tag}`);
-        return { release: null, notModified: false };
+        if (this.isNotFound(err)) {
+          return { release: null, notModified: false };
+        }
+        throw err;
       }
     });
   }
@@ -74,6 +78,7 @@ export class GitHubClient {
   ): Promise<{ releases: Release[]; etag?: string; lastModified?: string; notModified: boolean }> {
     const cacheKey = `releases:${owner}:${repo}`;
     const conditionalHeaders = this.buildConditionalHeaders(cacheKey);
+    const isConditional = Object.keys(conditionalHeaders).length > 0;
 
     return this.withRetry(async () => {
       try {
@@ -88,6 +93,8 @@ export class GitHubClient {
         this.extractRateLimitInfo(h);
         this.storeETag(cacheKey, h);
 
+        if (isConditional) this.etagStore?.recordConditionalRequest();
+
         return {
           releases: response.data.map((r) => this.mapRelease(r)),
           etag: h.etag,
@@ -96,16 +103,17 @@ export class GitHubClient {
         };
       } catch (err: unknown) {
         if (this.isNotModified(err)) {
-          this.etagStore?.recordConditionalRequest(true);
+          this.etagStore?.recordConditionalRequest();
+          this.etagStore?.recordNotModified();
           return { releases: [], notModified: true };
         }
         if (this.isRateLimited(err)) {
-          const retryAfter = this.getRetryAfter(err);
-          if (retryAfter) await this.sleep(retryAfter * 1000);
           throw err;
         }
-        console.warn("[github] releases list failed for", `${owner}/${repo}`);
-        return { releases: [], notModified: false };
+        if (this.isNotFound(err)) {
+          return { releases: [], notModified: false };
+        }
+        throw err;
       }
     });
   }
@@ -133,12 +141,12 @@ export class GitHubClient {
         return null;
       } catch (error: unknown) {
         if (this.isRateLimited(error)) {
-          const retryAfter = this.getRetryAfter(error);
-          if (retryAfter) await this.sleep(retryAfter * 1000);
           throw error;
         }
-        console.warn("[github] asset download failed:", error);
-        return null;
+        if (this.isNotFound(error)) {
+          return null;
+        }
+        throw error;
       }
     });
   }
@@ -148,7 +156,6 @@ export class GitHubClient {
     const entry = this.etagStore.get(cacheKey);
     if (!entry) return {};
 
-    this.etagStore.recordConditionalRequest(false);
     const headers: ConditionalHeaders = {};
     if (entry.lastModified) headers["if-modified-since"] = entry.lastModified;
     if (entry.etag) headers["if-none-match"] = entry.etag;
@@ -195,6 +202,11 @@ export class GitHubClient {
     );
   }
 
+  private isNotFound(err: unknown): boolean {
+    if (typeof err !== "object" || err === null) return false;
+    return (err as { status?: number }).status === 404;
+  }
+
   private isRateLimited(err: unknown): boolean {
     if (typeof err !== "object" || err === null) return false;
     const status = (err as { status?: number }).status;
@@ -219,7 +231,10 @@ export class GitHubClient {
       } catch (err) {
         lastError = err;
         if (attempt < MAX_RETRIES && this.isRateLimited(err)) {
-          const delay = RETRY_BASE_MS * Math.pow(2, attempt);
+          const retryAfter = this.getRetryAfter(err);
+          const delay = retryAfter
+            ? retryAfter * 1000
+            : RETRY_BASE_MS * Math.pow(2, attempt);
           console.warn(`[github] rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
           await this.sleep(delay);
           continue;

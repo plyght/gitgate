@@ -58,9 +58,18 @@ export class GitGateCache {
     return { data: entry.data, meta: entry.meta, stale };
   }
 
-  getStale(key: string): CacheGetResult | null {
+  getStale(key: string, reason: "revalidate" | "error" = "error"): CacheGetResult | null {
     const entry = this.memory.peek(key);
     if (!entry) return null;
+
+    const age = Date.now() - entry.meta.timestamp;
+    const budget = reason === "revalidate"
+      ? entry.meta.stale_while_revalidate
+      : entry.meta.stale_if_error;
+    const maxAge = (entry.meta.ttl + budget) * 1000;
+
+    if (age > maxAge) return null;
+
     return { data: entry.data, meta: entry.meta, stale: true };
   }
 

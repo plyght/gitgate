@@ -30,7 +30,7 @@ export function createServer(config: Config): Hono {
 
   const githubClient = new GitHubClient({
     token: config.github.token,
-    etagStore: cache.etags,
+    etagStore: cacheConfig.enable_etags ? cache.etags : undefined,
     onRateLimitUpdate: (info) => cache.updateRateLimitInfo(info),
   });
 
@@ -102,12 +102,36 @@ export function createServer(config: Config): Hono {
     return c.json({ status: "ok", timestamp: Date.now() });
   });
 
-  app.get("/cache/stats", (c) => {
+  app.get("/cache/stats", async (c) => {
+    const headers = collectValidatedHeaders(c.req.raw.headers);
+    const device = await authenticateDevice(
+      config.auth.method,
+      headers,
+      undefined,
+      getAuthConfig(),
+    );
+    if (!device) {
+      auditLogger.logAction("unknown", "cache_stats", "/cache/stats", "failure");
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    auditLogger.logAction(device.device_id, "cache_stats", "/cache/stats", "success");
     return c.json(cache.getStats());
   });
 
-  app.delete("/cache", (c) => {
+  app.delete("/cache", async (c) => {
+    const headers = collectValidatedHeaders(c.req.raw.headers);
+    const device = await authenticateDevice(
+      config.auth.method,
+      headers,
+      undefined,
+      getAuthConfig(),
+    );
+    if (!device) {
+      auditLogger.logAction("unknown", "cache_clear", "/cache", "failure");
+      return c.json({ error: "Unauthorized" }, 401);
+    }
     cache.clear();
+    auditLogger.logAction(device.device_id, "cache_clear", "/cache", "success");
     return c.json({ status: "ok", message: "Cache cleared" });
   });
 
@@ -345,6 +369,11 @@ export function createServer(config: Config): Hono {
       const releaseResult = await githubClient.getRelease(owner, repo, version);
 
       if (releaseResult.notModified && cached) {
+        cache.set(cacheKey, cached.data, {
+          contentType: "application/octet-stream",
+          etag: cached.meta.etag,
+          lastModified: cached.meta.last_modified,
+        });
         applyCacheHeaders(c, true, false);
         c.header("X-Checksum-SHA256", cached.meta.checksum);
         if (assetSigner) c.header("X-Signature-RSA-SHA256", assetSigner.sign(cached.data));

@@ -49,10 +49,10 @@ export class MemoryCache {
   }
 
   /**
-   * Returns stale entry even if expired (for stale-while-revalidate).
+   * Returns entry without updating recency or TTL age (non-mutating read).
    */
   peek(key: string): MemoryCacheEntry | undefined {
-    return this.cache.get(key, { allowStale: true });
+    return this.cache.peek(key, { allowStale: true });
   }
 
   set(key: string, entry: MemoryCacheEntry, ttlMs?: number): void {

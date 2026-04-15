@@ -34,11 +34,12 @@ export class ETagStore {
     this.store.delete(key);
   }
 
-  recordConditionalRequest(wasNotModified: boolean): void {
+  recordConditionalRequest(): void {
     this.conditionalRequests++;
-    if (wasNotModified) {
-      this.notModifiedResponses++;
-    }
+  }
+
+  recordNotModified(): void {
+    this.notModifiedResponses++;
   }
 
   get stats() {
