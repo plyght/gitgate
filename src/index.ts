@@ -14,4 +14,4 @@ const server = Bun.serve({
 
 console.log(`GitGate service running on http://${config.host}:${config.port}`);
 console.log(`Auth method: ${config.auth.method}`);
-console.log(`Cache directory: ${config.github.cache_dir}`);
+console.log(`Cache: in-memory LRU (max ${config.github.cache?.max_items ?? 500} items, ${config.github.cache?.max_mb ?? 256} MB)`);

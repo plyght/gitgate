@@ -4,7 +4,16 @@
   "github": {
     "token": "ghp_your_fine_grained_pat_here",
     "cache_dir": "./cache",
-    "cache_ttl_seconds": 3600
+    "cache_ttl_seconds": 3600,
+    "cache": {
+      "metadata_ttl_seconds": 300,
+      "asset_ttl_seconds": 86400,
+      "max_items": 500,
+      "max_mb": 256,
+      "stale_while_revalidate_seconds": 60,
+      "stale_if_error_seconds": 3600,
+      "enable_etags": true
+    }
   },
   "auth": {
     "method": "jamf",

@@ -11,6 +11,12 @@ function parseBoolean(value: string | undefined): boolean {
   return value.toLowerCase() === "true" || value === "1";
 }
 
+function safeParseInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function loadFromEnv(): Config | null {
   const requiredEnvVars = ["GITHUB_TOKEN", "AUTH_METHOD"];
   const hasRequiredVars = requiredEnvVars.every((key) => process.env[key]);
@@ -29,6 +35,15 @@ function loadFromEnv(): Config | null {
         process.env.GITHUB_CACHE_TTL_SECONDS || "3600",
         10,
       ),
+      cache: {
+        metadata_ttl_seconds: safeParseInt(process.env.CACHE_METADATA_TTL_SECONDS, 300),
+        asset_ttl_seconds: safeParseInt(process.env.CACHE_ASSET_TTL_SECONDS, 86400),
+        max_items: safeParseInt(process.env.CACHE_MAX_ITEMS, 500),
+        max_mb: safeParseInt(process.env.CACHE_MAX_MB, 256),
+        stale_while_revalidate_seconds: safeParseInt(process.env.CACHE_STALE_WHILE_REVALIDATE_SECONDS, 60),
+        stale_if_error_seconds: safeParseInt(process.env.CACHE_STALE_IF_ERROR_SECONDS, 3600),
+        enable_etags: parseBoolean(process.env.CACHE_ENABLE_ETAGS || "true"),
+      },
     },
     auth: {
       method: process.env.AUTH_METHOD as
